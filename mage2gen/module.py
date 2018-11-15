@@ -163,7 +163,7 @@ class Phpmethod:
 		docstring = '/**'
 		docstring +=  '\n\t *' + '\n\t *'.join(" {}".format(line.strip()) if len(line.strip()) else '' for line in self.docstring)
 		docstring += '\n\t */\n\t'
-		return docstring			
+		return docstring
 
 
 	def add_body_code(self,code):
@@ -287,7 +287,7 @@ class StaticFile:
 		for code in other._context_data['body']:
 			if code not in self._context_data['body']:
 				self._context_data['body'].append(code)	
-		return self	
+		return self
 
 	def context_data(self):
 		data = self._context_data
@@ -311,6 +311,93 @@ class StaticFile:
 		with open(file_path, 'w+', encoding='utf-8') as static_file:
 			static_file.writelines(self.generate())
 
+###############################################################################
+# GraphQl Object Type
+###############################################################################
+class GraphQlSchema:
+	template_file = os.path.join(TEMPLATE_DIR, 'graphqlschema.tmpl')
+
+	def __init__(self):
+		self.object_types = []
+
+	def __eq__(self, other):
+		return self
+
+	def __add__(self, other):
+		for object_type in other.object_types:
+			self.add_objecttype(object_type)
+		return self
+
+	def add_objecttype(self, object_type):
+		if object_type in self.object_types:
+			object_type_index = self.object_types.index(object_type)
+			self.object_types[object_type_index] = self.object_types[object_type_index] + object_type
+		else:
+			self.object_types.append(object_type)
+
+	def context_data(self):
+		object_types = '\n\n'.join(m.generate() for m in self.object_types)
+		if object_types:
+			object_types = '\n' + object_types
+
+		return {
+			'object_types': object_types
+		}
+
+	def generate(self):
+		with open(self.template_file, 'rb') as tmpl:
+			template = tmpl.read().decode('utf-8')
+
+		return template.format(
+			**self.context_data()
+		).replace('\t', '    ')  # Make generated code PSR2 compliant
+
+	def save(self, path):
+		try:
+			os.makedirs(os.path.dirname(path))
+		except Exception:
+			pass
+
+		with open(path, 'w+', encoding='utf-8') as class_file:
+			class_file.writelines(self.generate())
+
+
+class GraphQlObjectType:
+
+	def __init__(self, type, **kwargs):
+
+		self.type = type
+		self.body = [kwargs.get('body', '')]
+		self.template_file = os.path.join(TEMPLATE_DIR, 'graphqlobjecttype.tmpl')
+
+	def __eq__(self, other):
+		return self.type == other.type
+
+	def __add__(self, other):
+		return self
+
+	def __hash__(self):
+		return hash(self.name)
+
+	def add_body_code(self,code):
+		if code not in self.body:
+			self.append(code)
+
+	def body_code(self):
+		body_string = ''
+		for body_code in self.body:
+			if body_code:
+				body_string += '\n\t\t'.join(s.strip('\t') for s in body_code.splitlines()) + '\n\n\t\t'
+		return body_string.strip()
+
+	def generate(self):
+		with open(self.template_file, 'rb') as tmpl:
+			template = tmpl.read().decode('utf-8')
+
+		return template.format(
+			type=self.type,
+			body=self.body_code()
+		).replace('\t', '    ')  # Make generated code PSR2 compliant
 
 ###############################################################################
 # Module
@@ -322,6 +409,7 @@ class Module:
 		self.name = upperfirst(name)
 		self.description = description
 		self.license = license
+		self._graphqlschemas = {}
 		self._xmls = {}
 		self._classes = {}
 		self._static_files = {}
@@ -385,6 +473,10 @@ class Module:
 		for class_name, phpclass in self._classes.items():
 			phpclass.save(root_location)
 
+		for graphqlschema_file, graphqlobjecttype in self._graphqlschemas.items():
+			path = os.path.join(location, graphqlschema_file)
+			graphqlobjecttype.save(path)
+
 		for xml_file, node in self._xmls.items():
 			path = os.path.join(location, xml_file)
 			node.save(path)
@@ -407,6 +499,13 @@ class Module:
 		current_class.license = self.license
 		
 		self._classes[current_class.class_namespace] = current_class
+
+	def add_graphqlschema(self, graphqlschema_file, type):
+		current_schema = self._graphqlschemas.get(graphqlschema_file)
+		if current_schema:
+			current_schema += type
+		else:
+			self._graphqlschemas[graphqlschema_file] = type
 
 	def add_xml(self, xml_file, node):
 		current_xml = self._xmls.get(xml_file)
